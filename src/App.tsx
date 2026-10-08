@@ -1,11 +1,14 @@
-import { createContext, useContext, useEffect, useMemo, useState, type FormEvent } from 'react'
+﻿import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { BrowserRouter, Link, NavLink, Navigate, Outlet, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { ArrowRight, Bookmark, Check, ChevronDown, CircleHelp, Clock3, GraduationCap, LogOut, Menu, Moon, Search, Sparkles, Sun, X } from 'lucide-react'
 import { isSupabaseConfigured, supabase, type Course, type Profile } from './lib/supabase'
-import { VideoRoom } from './components/VideoRoom'
-import { AuthPage } from './pages/AuthPage'
-import { CoursePage, CoursesPage, DashboardPage, HomePage } from './pages/Pages'
-import { LessonPage } from './pages/Lessons'
+const VideoRoom = lazy(() => import('./components/VideoRoom').then(module => ({ default: module.VideoRoom })))
+const AuthPage = lazy(() => import('./pages/AuthPage').then(module => ({ default: module.AuthPage })))
+const HomePage = lazy(() => import('./pages/Pages').then(module => ({ default: module.HomePage })))
+const CoursesPage = lazy(() => import('./pages/Pages').then(module => ({ default: module.CoursesPage })))
+const CoursePage = lazy(() => import('./pages/Pages').then(module => ({ default: module.CoursePage })))
+const DashboardPage = lazy(() => import('./pages/Pages').then(module => ({ default: module.DashboardPage })))
+const LessonPage = lazy(() => import('./pages/Lessons').then(module => ({ default: module.LessonPage })))
 
 type AppContextType = {
   session: { user: { id: string; email?: string } } | null
@@ -22,7 +25,7 @@ export function useApp() { const value = useContext(AppContext); if (!value) thr
 export default function App() {
   const [session, setSession] = useState<AppContextType['session']>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [courses, setCourses] = useState<Course[]>([])
+  const [courses, setCourses] = useState<Course[]>(() => { try { return JSON.parse(localStorage.getItem('forma-courses') || '[]') as Course[] } catch { return [] } })
   const [enrollments, setEnrollments] = useState<string[]>([])
   const [notice, setNotice] = useState('')
   const [dark, setDark] = useState(() => localStorage.getItem('forma-theme') === 'dark')
@@ -30,7 +33,7 @@ export default function App() {
   const refreshCourses = async () => {
     const { data, error } = await supabase.from('courses').select('id,title,description,category,trainer_id,created_at,profiles(full_name)').order('created_at', { ascending: false })
     if (error) { if (isSupabaseConfigured) tell(error.message); return }
-    setCourses((data ?? []) as unknown as Course[])
+    const fresh = (data ?? []) as unknown as Course[]; setCourses(fresh); try { localStorage.setItem('forma-courses', JSON.stringify(fresh)) } catch { /* cache storage is optional */ }
   }
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
@@ -52,7 +55,7 @@ export default function App() {
   }, [])
   useEffect(() => { document.documentElement.classList.toggle('dark', dark); localStorage.setItem('forma-theme', dark ? 'dark' : 'light') }, [dark])
   const value = useMemo(() => ({ session, profile, courses, enrollments, notice, tell, refreshCourses }), [session, profile, courses, enrollments, notice])
-  return <AppContext.Provider value={value}><BrowserRouter><Routes><Route element={<SiteLayout dark={dark} toggleTheme={() => setDark(v => !v)} />}><Route path="/" element={<HomePage/>}/><Route path="/formations" element={<CoursesPage/>}/><Route path="/formations/:courseId" element={<CoursePage/>}/><Route path="/formations/:courseId/lecons/:lessonId" element={<LessonPage/>}/><Route path="/dashboard" element={<DashboardPage/>}/></Route><Route path="/connexion" element={<AuthPage mode="login"/>}/><Route path="/inscription" element={<AuthPage mode="signup"/>}/><Route path="/salle/:courseId" element={<RoomRoute/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes>{notice&&<div className="toast"><Check size={16}/>{notice}<button onClick={()=>setNotice('')} aria-label="Fermer"><X size={15}/></button></div>}{!isSupabaseConfigured&&<div className="config-note"><CircleHelp size={15}/> Ajoutez les clés Supabase dans .env</div>}</BrowserRouter></AppContext.Provider>
+  return <AppContext.Provider value={value}><BrowserRouter><Suspense fallback={<div className="route-loading"><span className="loading-spinner"/>Chargement de votre espace…</div>}><Routes><Route element={<SiteLayout dark={dark} toggleTheme={() => setDark(v => !v)} />}><Route path="/" element={<HomePage/>}/><Route path="/formations" element={<CoursesPage/>}/><Route path="/formations/:courseId" element={<CoursePage/>}/><Route path="/formations/:courseId/lecons/:lessonId" element={<LessonPage/>}/><Route path="/dashboard" element={<DashboardPage/>}/></Route><Route path="/connexion" element={<AuthPage mode="login"/>}/><Route path="/inscription" element={<AuthPage mode="signup"/>}/><Route path="/salle/:courseId" element={<RoomRoute/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></Suspense>{notice&&<div className="toast"><Check size={16}/>{notice}<button onClick={()=>setNotice('')} aria-label="Fermer"><X size={15}/></button></div>}{!isSupabaseConfigured&&<div className="config-note"><CircleHelp size={15}/> Ajoutez les clés Supabase dans .env</div>}</BrowserRouter></AppContext.Provider>
 }
 
 function SiteLayout({dark,toggleTheme}:{dark:boolean;toggleTheme:()=>void}) {
@@ -65,7 +68,7 @@ export function CourseCard({course,index=0,progress,onClick}:{course:Course;inde
   const palettes=['violet','blue','amber','mint']; const imageIds=['photo-1516321318423-f06f85e504b3','photo-1521737711867-e3b97375f902','photo-1558655146-9f40138edfeb','photo-1498050108023-c5249f4df085']
   const image=`https://images.unsplash.com/${imageIds[index%imageIds.length]}?auto=format&fit=crop&w=900&q=80`
   const [saved,setSaved]=useState(false)
-  return <article className="course-card transition-all duration-300 hover:-translate-y-1" onClick={onClick}><div className={`course-cover ${palettes[index%4]}`} style={{backgroundImage:`linear-gradient(180deg,rgba(18,22,39,.04),rgba(18,22,39,.2)),url(${image})`}}><span className="course-category">{course.category||'Formation'}</span><button className={`bookmark ${saved?'is-saved':''}`} aria-label={saved?'Retirer des favoris':'Ajouter aux favoris'} aria-pressed={saved} onClick={e=>{e.stopPropagation();setSaved(v=>!v)}}><Bookmark size={15} fill={saved?'currentColor':'none'}/></button><span className="cover-level">À découvrir</span></div><div className="course-card-content"><div className="course-meta"><span><Clock3 size={13}/> 4 h 30</span><span><GraduationCap size={14}/> Tous niveaux</span></div><h3>{course.title}</h3><div className="course-teacher"><span className="avatar teacher-avatar">{course.profiles?.full_name?.slice(0,1).toUpperCase()??'F'}</span><span>{course.profiles?.full_name??'Formateur Forma'}</span><span className="rating">★ 4.9</span></div>{progress!==undefined&&<div className="progress-wrap"><div className="progress-label"><span>Votre progression</span><b>{progress}%</b></div><div className="progress-track"><span style={{width:`${progress}%`}}/></div></div>}<button className="course-start" onClick={e=>{e.stopPropagation();onClick?.()}}>Découvrir le cours <ArrowRight size={15}/></button></div></article>
+  return <article className="course-card transition-all duration-300 hover:-translate-y-1" onClick={onClick}><div className={`course-cover ${palettes[index%4]}`} ><img src={image} alt="" loading="lazy" decoding="async"/><span className="course-category">{course.category||'Formation'}</span><button className={`bookmark ${saved?'is-saved':''}`} aria-label={saved?'Retirer des favoris':'Ajouter aux favoris'} aria-pressed={saved} onClick={e=>{e.stopPropagation();setSaved(v=>!v)}}><Bookmark size={15} fill={saved?'currentColor':'none'}/></button><span className="cover-level">À découvrir</span></div><div className="course-card-content"><div className="course-meta"><span><Clock3 size={13}/> 4 h 30</span><span><GraduationCap size={14}/> Tous niveaux</span></div><h3>{course.title}</h3><div className="course-teacher"><span className="avatar teacher-avatar">{course.profiles?.full_name?.slice(0,1).toUpperCase()??'F'}</span><span>{course.profiles?.full_name??'Formateur Forma'}</span><span className="rating">★ 4.9</span></div>{progress!==undefined&&<div className="progress-wrap"><div className="progress-label"><span>Votre progression</span><b>{progress}%</b></div><div className="progress-track"><span style={{width:`${progress}%`}}/></div></div>}<button className="course-start" onClick={e=>{e.stopPropagation();onClick?.()}}>Découvrir le cours <ArrowRight size={15}/></button></div></article>
 }
 
 export function SectionHeading({eyebrow,title,action,link}:{eyebrow?:string;title:string;action?:string;link?:string}) { return <div className="section-heading"><div>{eyebrow&&<div className="eyebrow">{eyebrow}</div>}<h2>{title}</h2></div>{action&&<Link className="section-link" to={link??'/formations'}>{action}<ArrowRight size={16}/></Link>}</div> }
