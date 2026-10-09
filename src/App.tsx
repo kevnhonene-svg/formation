@@ -17,7 +17,7 @@ type AppContextType = {
   enrollments: string[]
   notice: string
   tell: (message: string) => void
-  refreshCourses: () => Promise<void>
+  refreshCourses: () => Promise<void>; refreshEnrollments: () => Promise<void>
 }
 const AppContext = createContext<AppContextType | null>(null)
 export function useApp() { const value = useContext(AppContext); if (!value) throw new Error('useApp doit être utilisé dans App'); return value }
@@ -34,6 +34,12 @@ export default function App() {
     const { data, error } = await supabase.from('courses').select('id,title,description,category,trainer_id,created_at,profiles(full_name)').order('created_at', { ascending: false })
     if (error) { if (isSupabaseConfigured) tell(error.message); return }
     const fresh = (data ?? []) as unknown as Course[]; setCourses(fresh); try { localStorage.setItem('forma-courses', JSON.stringify(fresh)) } catch { /* cache storage is optional */ }
+  }
+  const refreshEnrollments = async () => {
+    if (!session) { setEnrollments([]); return }
+    const { data, error } = await supabase.from('enrollments').select('course_id').eq('student_id', session.user.id)
+    if (error) { tell(error.message); return }
+    setEnrollments((data ?? []).map(row => row.course_id))
   }
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
@@ -54,7 +60,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => { document.documentElement.classList.toggle('dark', dark); localStorage.setItem('forma-theme', dark ? 'dark' : 'light') }, [dark])
-  const value = useMemo(() => ({ session, profile, courses, enrollments, notice, tell, refreshCourses }), [session, profile, courses, enrollments, notice])
+  const value = useMemo(() => ({ session, profile, courses, enrollments, notice, tell, refreshCourses, refreshEnrollments }), [session, profile, courses, enrollments, notice])
   return <AppContext.Provider value={value}><BrowserRouter><Suspense fallback={<div className="route-loading"><span className="loading-spinner"/>Chargement de votre espace…</div>}><Routes><Route element={<SiteLayout dark={dark} toggleTheme={() => setDark(v => !v)} />}><Route path="/" element={<HomePage/>}/><Route path="/formations" element={<CoursesPage/>}/><Route path="/formations/:courseId" element={<CoursePage/>}/><Route path="/formations/:courseId/lecons/:lessonId" element={<LessonPage/>}/><Route path="/dashboard" element={<DashboardPage/>}/></Route><Route path="/connexion" element={<AuthPage mode="login"/>}/><Route path="/inscription" element={<AuthPage mode="signup"/>}/><Route path="/salle/:courseId" element={<RoomRoute/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></Suspense>{notice&&<div className="toast"><Check size={16}/>{notice}<button onClick={()=>setNotice('')} aria-label="Fermer"><X size={15}/></button></div>}{!isSupabaseConfigured&&<div className="config-note"><CircleHelp size={15}/> Ajoutez les clés Supabase dans .env</div>}</BrowserRouter></AppContext.Provider>
 }
 
